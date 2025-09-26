@@ -31,6 +31,8 @@
 
   <script>
     // === Initialisation Cesium avec OpenStreetMap ===
+    Cesium.Ion.defaultAccessToken = 'YOUR_ION_ACCESS_TOKEN'; // Optionnel si vous utilisez le terrain Cesium
+
     const viewer = new Cesium.Viewer("map", {
       imageryProvider: new Cesium.UrlTemplateImageryProvider({
         url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -44,7 +46,7 @@
       viewer.entities.removeAll();
     }
 
-    // === Affichage d’une trace ===
+    // === Affichage d'une trace ===
     function showTrace(coords, name) {
       if (coords.length < 2) return;
 
@@ -61,12 +63,12 @@
       const start = coords[0];
       const end = coords[coords.length - 1];
       viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(...start),
+        position: Cesium.Cartesian3.fromDegrees(start[0], start[1], start[2]),
         point: { pixelSize: 10, color: Cesium.Color.GREEN },
         label: { text: `Départ: ${Math.round(start[2])}m`, font: "14px sans-serif", fillColor: Cesium.Color.WHITE }
       });
       viewer.entities.add({
-        position: Cesium.Cartesian3.fromDegrees(...end),
+        position: Cesium.Cartesian3.fromDegrees(end[0], end[1], end[2]),
         point: { pixelSize: 10, color: Cesium.Color.RED },
         label: { text: `Arrivée: ${Math.round(end[2])}m`, font: "14px sans-serif", fillColor: Cesium.Color.WHITE }
       });
@@ -97,4 +99,82 @@
           if (lonDir === "W") lon = -lon;
 
           const alt = parseInt(altStr, 10);
-          if
+          if (!isNaN(lat) && !isNaN(lon) && !isNaN(alt)) {
+            coords.push([lon, lat, alt]);
+          }
+        }
+      });
+      return coords;
+    }
+
+    // === Parsing GPX ===
+    function parseGPX(content) {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(content, "text/xml");
+      const trackPoints = xmlDoc.getElementsByTagName("trkpt");
+      const coords = [];
+      
+      for (let i = 0; i < trackPoints.length; i++) {
+        const pt = trackPoints[i];
+        const lat = parseFloat(pt.getAttribute("lat"));
+        const lon = parseFloat(pt.getAttribute("lon"));
+        const ele = parseFloat(pt.getElementsByTagName("ele")[0]?.textContent || 0);
+        coords.push([lon, lat, ele]);
+      }
+      return coords;
+    }
+
+    // === Parsing KML ===
+    function parseKML(content) {
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(content, "text/xml");
+      const coordinates = xmlDoc.getElementsByTagName("coordinates");
+      const coords = [];
+      
+      if (coordinates.length > 0) {
+        const coordText = coordinates[0].textContent.trim();
+        const points = coordText.split(/\s+/);
+        
+        points.forEach(point => {
+          const [lon, lat, alt] = point.split(',').map(Number);
+          if (!isNaN(lon) && !isNaN(lat)) {
+            coords.push([lon, lat, alt || 0]);
+          }
+        });
+      }
+      return coords;
+    }
+
+    // === Gestionnaire de fichier ===
+    document.getElementById('fileInput').addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const content = e.target.result;
+        let coords = [];
+        let name = file.name;
+        
+        clearEntities();
+        
+        if (file.name.endsWith('.igc')) {
+          coords = parseIGC(content);
+        } else if (file.name.endsWith('.gpx')) {
+          coords = parseGPX(content);
+        } else if (file.name.endsWith('.kml')) {
+          coords = parseKML(content);
+        }
+        
+        if (coords.length > 0) {
+          showTrace(coords, name);
+          document.getElementById('info').textContent = `${name} - ${coords.length} points`;
+        } else {
+          document.getElementById('info').textContent = 'Aucune trace valide trouvée';
+        }
+      };
+      reader.readAsText(file);
+    });
+  </script>
+</body>
+</html>
