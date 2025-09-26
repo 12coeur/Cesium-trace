@@ -2,17 +2,17 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Trace 3D avec CesiumJS</title>
+  <title>Trace CesiumJS</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.122/Cesium.js"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.122/Widgets/widgets.css" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
   <style>
     html, body, #map { width:100%; height:100%; margin:0; padding:0; }
-    #fileInput { position: absolute; top: 10px; left: 10px; z-index: 10; }
+    #info { position:absolute; top:10px; left:10px; background:rgba(0,0,0,0.5); color:white; padding:5px; font-size:14px; z-index:10; }
   </style>
 </head>
 <body>
-  <input type="file" id="fileInput" accept=".igc,.gpx,.kml">
+  <div id="info">Affichage automatique de <b>traces/test.gpx</b></div>
   <div id="map"></div>
 
   <script>
@@ -23,16 +23,16 @@
       animation: false,
       baseLayerPicker: false
     });
-    viewer.scene.globe.terrainExaggeration = 1.2; // facteur Z
+    viewer.scene.globe.terrainExaggeration = 1.2;
 
-    // === Fonction d’affichage d’une trace ===
-    function showTrace(coords, fileName) {
+    // === Fonction d’affichage ===
+    function showTrace(coords, name) {
       if (coords.length < 2) return;
 
-      // Création de la polyline 3D
+      // Ligne
       const positions = Cesium.Cartesian3.fromDegreesArrayHeights(coords.flat());
       viewer.entities.add({
-        name: fileName,
+        name,
         polyline: {
           positions,
           width: 3,
@@ -46,82 +46,51 @@
       viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(...start),
         point: { pixelSize: 10, color: Cesium.Color.GREEN },
-        label: { text: `Départ: ${start[2]}m`, font: "14px sans-serif", fillColor: Cesium.Color.WHITE }
+        label: { text: `Départ: ${Math.round(start[2])}m`, font: "14px sans-serif", fillColor: Cesium.Color.WHITE }
       });
       viewer.entities.add({
         position: Cesium.Cartesian3.fromDegrees(...end),
         point: { pixelSize: 10, color: Cesium.Color.RED },
-        label: { text: `Arrivée: ${end[2]}m`, font: "14px sans-serif", fillColor: Cesium.Color.WHITE }
+        label: { text: `Arrivée: ${Math.round(end[2])}m`, font: "14px sans-serif", fillColor: Cesium.Color.WHITE }
       });
 
-      // Ajustement de la vue
       viewer.zoomTo(viewer.entities);
     }
 
-    // === Parsing simple IGC ===
-    function parseIGC(content) {
-      const lines = content.split("\n");
-      const coords = [];
-      lines.forEach(line => {
-        if (line.startsWith("B") && line.length >= 35) {
-          const latStr = line.substring(7, 15);
-          const lonStr = line.substring(15, 24);
-          const altStr = line.substring(30, 35);
+    // === Charger automatiquement un fichier GPX/KML/IGC ===
+    async function loadTrace(url) {
+      const response = await fetch(url);
+      if (!response.ok) {
+        document.getElementById("info").innerText = "Erreur : impossible de charger " + url;
+        return;
+      }
+      const text = await response.text();
+      const ext = url.split(".").pop().toLowerCase();
+      let coords = [];
 
-          const latDeg = parseInt(latStr.substring(0, 2), 10);
-          const latMin = parseFloat(latStr.substring(2, 7)) / 1000;
-          const latDir = latStr[7];
-          let lat = latDeg + latMin / 60;
-          if (latDir === "S") lat = -lat;
-
-          const lonDeg = parseInt(lonStr.substring(0, 3), 10);
-          const lonMin = parseFloat(lonStr.substring(3, 8)) / 1000;
-          const lonDir = lonStr[8];
-          let lon = lonDeg + lonMin / 60;
-          if (lonDir === "W") lon = -lon;
-
-          const alt = parseInt(altStr, 10);
-          if (!isNaN(lat) && !isNaN(lon) && !isNaN(alt)) {
-            coords.push([lon, lat, alt]);
+      if (ext === "gpx" || ext === "kml") {
+        const xml = new DOMParser().parseFromString(text, "text/xml");
+        const geojson = ext === "gpx" ? toGeoJSON.gpx(xml) : toGeoJSON.kml(xml);
+        geojson.features.forEach(f => {
+          if (f.geometry.type === "LineString") {
+            coords.push(...f.geometry.coordinates.map(c => [c[0], c[1], c[2] || 0]));
           }
-        }
-      });
-      return coords;
+        });
+      } else {
+        document.getElementById("info").innerText = "Format non supporté en auto-chargement";
+        return;
+      }
+
+      if (coords.length > 1) {
+        showTrace(coords, url);
+        document.getElementById("info").innerText = "Trace chargée : " + url;
+      } else {
+        document.getElementById("info").innerText = "Aucune donnée exploitable dans " + url;
+      }
     }
 
-    // === Gestion input fichier ===
-    document.getElementById("fileInput").addEventListener("change", e => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = ev => {
-        const ext = file.name.split(".").pop().toLowerCase();
-        let coords = [];
-
-        if (ext === "gpx" || ext === "kml") {
-          const xml = new DOMParser().parseFromString(ev.target.result, "text/xml");
-          const geojson = ext === "gpx" ? toGeoJSON.gpx(xml) : toGeoJSON.kml(xml);
-          geojson.features.forEach(f => {
-            if (f.geometry.type === "LineString") {
-              coords.push(...f.geometry.coordinates.map(c => [c[0], c[1], c[2] || 0]));
-            }
-          });
-        } else if (ext === "igc") {
-          coords = parseIGC(ev.target.result);
-        } else {
-          alert("Format non supporté");
-        }
-
-        if (coords.length > 1) {
-          showTrace(coords, file.name);
-        } else {
-          alert("Aucune donnée exploitable");
-        }
-      };
-      reader.readAsText(file);
-    });
+    // Charger la trace par défaut
+    loadTrace("traces/test.gpx");
   </script>
 </body>
 </html>
-	
