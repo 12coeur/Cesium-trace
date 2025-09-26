@@ -2,34 +2,52 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <title>Trace CesiumJS</title>
+  <title>Visualisation de traces CesiumJS</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.122/Cesium.js"></script>
   <link href="https://cdnjs.cloudflare.com/ajax/libs/cesium/1.122/Widgets/widgets.css" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/togeojson/0.16.0/togeojson.min.js"></script>
   <style>
     html, body, #map { width:100%; height:100%; margin:0; padding:0; }
-    #info { position:absolute; top:10px; left:10px; background:rgba(0,0,0,0.5); color:white; padding:5px; font-size:14px; z-index:10; }
+    #controls {
+      position:absolute;
+      top:10px; left:10px;
+      background:rgba(0,0,0,0.6);
+      padding:8px;
+      border-radius:4px;
+      z-index:10;
+      color:white;
+      font-family:sans-serif;
+      font-size:14px;
+    }
   </style>
 </head>
 <body>
-  <div id="info">Affichage automatique de <b>traces/test.gpx</b></div>
+  <div id="controls">
+    <input type="file" id="fileInput" accept=".gpx,.kml,.igc">
+    <div id="info" style="margin-top:5px; font-size:12px; color:#ccc;">Choisissez une trace</div>
+  </div>
+
   <div id="map"></div>
 
   <script>
-    // === Initialisation Cesium ===
+    // === Initialisation Cesium avec OpenStreetMap ===
     const viewer = new Cesium.Viewer("map", {
-      terrainProvider: Cesium.createWorldTerrain(),
+      imageryProvider: new Cesium.UrlTemplateImageryProvider({
+        url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+      }),
+      baseLayerPicker: false,
       timeline: false,
-      animation: false,
-      baseLayerPicker: false
+      animation: false
     });
-    viewer.scene.globe.terrainExaggeration = 1.2;
 
-    // === Fonction d’affichage ===
+    function clearEntities() {
+      viewer.entities.removeAll();
+    }
+
+    // === Affichage d’une trace ===
     function showTrace(coords, name) {
       if (coords.length < 2) return;
 
-      // Ligne
       const positions = Cesium.Cartesian3.fromDegreesArrayHeights(coords.flat());
       viewer.entities.add({
         name,
@@ -40,7 +58,6 @@
         }
       });
 
-      // Départ / Arrivée
       const start = coords[0];
       const end = coords[coords.length - 1];
       viewer.entities.add({
@@ -57,40 +74,27 @@
       viewer.zoomTo(viewer.entities);
     }
 
-    // === Charger automatiquement un fichier GPX/KML/IGC ===
-    async function loadTrace(url) {
-      const response = await fetch(url);
-      if (!response.ok) {
-        document.getElementById("info").innerText = "Erreur : impossible de charger " + url;
-        return;
-      }
-      const text = await response.text();
-      const ext = url.split(".").pop().toLowerCase();
-      let coords = [];
+    // === Parsing simple IGC ===
+    function parseIGC(content) {
+      const lines = content.split("\n");
+      const coords = [];
+      lines.forEach(line => {
+        if (line.startsWith("B") && line.length >= 35) {
+          const latStr = line.substring(7, 15);
+          const lonStr = line.substring(15, 24);
+          const altStr = line.substring(30, 35);
 
-      if (ext === "gpx" || ext === "kml") {
-        const xml = new DOMParser().parseFromString(text, "text/xml");
-        const geojson = ext === "gpx" ? toGeoJSON.gpx(xml) : toGeoJSON.kml(xml);
-        geojson.features.forEach(f => {
-          if (f.geometry.type === "LineString") {
-            coords.push(...f.geometry.coordinates.map(c => [c[0], c[1], c[2] || 0]));
-          }
-        });
-      } else {
-        document.getElementById("info").innerText = "Format non supporté en auto-chargement";
-        return;
-      }
+          const latDeg = parseInt(latStr.substring(0, 2), 10);
+          const latMin = parseFloat(latStr.substring(2, 7)) / 1000;
+          const latDir = latStr[7];
+          let lat = latDeg + latMin / 60;
+          if (latDir === "S") lat = -lat;
 
-      if (coords.length > 1) {
-        showTrace(coords, url);
-        document.getElementById("info").innerText = "Trace chargée : " + url;
-      } else {
-        document.getElementById("info").innerText = "Aucune donnée exploitable dans " + url;
-      }
-    }
+          const lonDeg = parseInt(lonStr.substring(0, 3), 10);
+          const lonMin = parseFloat(lonStr.substring(3, 8)) / 1000;
+          const lonDir = lonStr[8];
+          let lon = lonDeg + lonMin / 60;
+          if (lonDir === "W") lon = -lon;
 
-    // Charger la trace par défaut
-    loadTrace("traces/test.gpx");
-  </script>
-</body>
-</html>
+          const alt = parseInt(altStr, 10);
+          if
